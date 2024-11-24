@@ -27,6 +27,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/opencontainers/runc/libcontainer/cgroups"
+	"github.com/opencontainers/runc/libcontainer/cgroups/manager"
 	"github.com/opencontainers/runc/libcontainer/configs"
 	"github.com/opencontainers/runc/libcontainer/intelrdt"
 	"github.com/opencontainers/runc/libcontainer/system"
@@ -223,7 +224,7 @@ func (c *linuxContainer) Set(config configs.Config) error {
 	}
 	// After config setting succeed, update config and states
 	c.config = &config
-	_, err = c.updateState(nil)
+	_, err = c.updateState(nil, false)
 	return err
 }
 
@@ -1873,7 +1874,7 @@ func (c *linuxContainer) criuNotifications(resp *criurpc.CriuResp, process *Proc
 		}
 		// create a timestamp indicating when the restored checkpoint was started
 		c.created = time.Now().UTC()
-		if _, err := c.updateState(r); err != nil {
+		if _, err := c.updateState(r, false); err != nil {
 			return err
 		}
 		if err := os.Remove(filepath.Join(c.root, "checkpoint")); err != nil {
@@ -1912,7 +1913,7 @@ func (c *linuxContainer) criuNotifications(resp *criurpc.CriuResp, process *Proc
 	return nil
 }
 
-func (c *linuxContainer) updateState(process parentProcess) (*State, error) {
+func (c *linuxContainer) updateState(process parentProcess, isCreating bool) (*State, error) {
 	if process != nil {
 		c.initProcess = process
 	}
@@ -1920,14 +1921,14 @@ func (c *linuxContainer) updateState(process parentProcess) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = c.saveState(state)
+	err = c.saveState(state, isCreating)
 	if err != nil {
 		return nil, err
 	}
 	return state, nil
 }
 
-func (c *linuxContainer) saveState(s *State) (retErr error) {
+func (c *linuxContainer) saveState(s *State, isCreating bool) (retErr error) {
 	tmpFile, err := os.CreateTemp(c.root, "state-")
 	if err != nil {
 		return err
@@ -1949,8 +1950,25 @@ func (c *linuxContainer) saveState(s *State) (retErr error) {
 		return err
 	}
 
-	stateFilePath := filepath.Join(c.root, stateFilename)
-	return os.Rename(tmpFile.Name(), stateFilePath)
+	var filePath string
+	if isCreating {
+		filePath = filepath.Join(c.root, creatingStateFilename)
+	} else {
+		filePath = filepath.Join(c.root, stateFilename)
+	}
+	return os.Rename(tmpFile.Name(), filePath)
+}
+
+func (c *linuxContainer) clearCreatingState() error {
+	creatingStateFilePath := filepath.Join(c.root, creatingStateFilename)
+	err := os.Remove(creatingStateFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			logrus.Warnf("%s is not exist", creatingStateFilePath)
+			return nil
+		}
+	}
+	return err
 }
 
 func (c *linuxContainer) currentStatus() (Status, error) {
@@ -2280,4 +2298,46 @@ func requiresRootOrMappingTool(c *configs.Config) bool {
 		{ContainerID: 0, HostID: int64(os.Getegid()), Size: 1},
 	}
 	return !reflect.DeepEqual(c.GidMappings, gidMap)
+}
+
+func LoadCreatingState(root string) (*State, error) {
+	stateFilePath, err := securejoin.SecureJoin(root, creatingStateFilename)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(stateFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotExist
+		}
+		return nil, err
+	}
+	defer f.Close()
+	var state *State
+	if err := json.NewDecoder(f).Decode(&state); err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
+func DestroyCreating(state *State, id string) error {
+	cm, err := manager.NewWithPaths(state.Config.Cgroups, state.CgroupPaths)
+	if err != nil {
+		return err
+	}
+
+	intelRdtManager := intelrdt.NewManager(&state.Config, id, state.IntelRdtPath)
+
+	if err := signalAllProcesses(cm, unix.SIGKILL); err != nil {
+		logrus.Warn(err)
+	}
+
+	err = cm.Destroy()
+	if intelRdtManager != nil {
+		if ierr := intelRdtManager.Destroy(); err == nil {
+			err = ierr
+		}
+	}
+
+	return err
 }

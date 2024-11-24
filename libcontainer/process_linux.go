@@ -405,6 +405,10 @@ func (p *initProcess) start() (retErr error) {
 		}
 	}()
 
+	_, err = p.container.updateState(p, true)
+	if err != nil {
+		return fmt.Errorf("unable to store creating state: %w", err)
+	}
 	// Do this before syncing with child so that no children can escape the
 	// cgroup. We don't need to worry about not doing this and not being root
 	// because we'd be using the rootless cgroup manager in that case.
@@ -546,9 +550,12 @@ func (p *initProcess) start() (retErr error) {
 			// In order to cleanup the runc-init[2:stage] by
 			// runc-delete/stop, we should store the status before
 			// procRun sync.
-			state, uerr := p.container.updateState(p)
+			state, uerr := p.container.updateState(p, false)
 			if uerr != nil {
 				return fmt.Errorf("unable to store init state: %w", err)
+			}
+			if err := p.container.clearCreatingState(); err != nil {
+				return fmt.Errorf("unable to remove creating state: %w", err)
 			}
 			p.container.initProcessStartTime = state.InitProcessStartTime
 

@@ -25,6 +25,7 @@ import (
 const (
 	stateFilename    = "state.json"
 	execFifoFilename = "exec.fifo"
+	creatingStateFilename = "creating-state.json"
 )
 
 var idRegex = regexp.MustCompile(`^[\w+-\.]+$`)
