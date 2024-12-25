@@ -551,6 +551,11 @@ func (p *initProcess) start() (retErr error) {
 		}
 	}()
 
+	_, err = p.container.updateState(p)
+	if err != nil {
+		return fmt.Errorf("unable to store init state before creating cgroup: %w", err)
+	}
+
 	// Do this before syncing with child so that no children can escape the
 	// cgroup. We don't need to worry about not doing this and not being root
 	// because we'd be using the rootless cgroup manager in that case.
@@ -714,8 +719,8 @@ func (p *initProcess) start() (retErr error) {
 
 			// generate a timestamp indicating when the container was started
 			p.container.created = time.Now().UTC()
-			p.container.state = &createdState{
-				c: p.container,
+			if err := p.container.state.transition(&createdState{c: p.container}); err != nil {
+				return err
 			}
 
 			// NOTE: If the procRun state has been synced and the

@@ -242,3 +242,29 @@ func (n *loadedState) destroy() error {
 	}
 	return n.c.state.destroy()
 }
+
+type creatingState struct {
+	c *Container
+}
+
+func (e *creatingState) status() Status {
+	return Creating
+}
+
+func (e *creatingState) transition(s containerState) error {
+	switch s.(type) {
+	case *createdState:
+		e.c.state = s
+		return nil
+	}
+	return newStateTransitionError(e, s)
+}
+
+func (e *creatingState) destroy() error {
+	if paused, _ := e.c.isPaused(); paused {
+		if err := e.c.cgroupManager.Freeze(cgroups.Thawed); err != nil {
+			return err
+		}
+	}
+	return destroy(e.c)
+}

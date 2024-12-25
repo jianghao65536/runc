@@ -22,10 +22,14 @@ const (
 	Paused
 	// Stopped is the status that denotes the container does not have a created or running process.
 	Stopped
+	// Creating
+	Creating
 )
 
 func (s Status) String() string {
 	switch s {
+	case Creating:
+		return "creating"
 	case Created:
 		return "created"
 	case Running:

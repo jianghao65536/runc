@@ -98,7 +98,7 @@ func Create(root, id string, config *configs.Config) (*Container, error) {
 		cgroupManager:   cm,
 		intelRdtManager: intelrdt.NewManager(config, id, ""),
 	}
-	c.state = &stoppedState{c: c}
+	c.state = &creatingState{c: c}
 	return c, nil
 }
 
