@@ -545,6 +545,12 @@ func (p *initProcess) start() (retErr error) {
 		}
 	}()
 
+	_, err = p.container.updateState(nil)
+	if err != nil {
+		return fmt.Errorf("unable to store init state before creating cgroup: %w", err)
+	}
+	p.container.initProcess = p
+
 	// Do this before syncing with child so that no children can escape the
 	// cgroup. We don't need to worry about not doing this and not being root
 	// because we'd be using the rootless cgroup manager in that case.
